@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Extractor de Imágenes PDF - BUMPRDO</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .upload-area {
+            border: 2px dashed #ccc;
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            margin: 20px 0;
+            background: #fafafa;
+        }
+        .upload-area.dragover {
+            border-color: #007bff;
+            background: #e3f2fd;
+        }
+        .btn {
+            background: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .btn:hover {
+            background: #0056b3;
+        }
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .progress {
+            width: 100%;
+            height: 20px;
+            background: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .progress-bar {
+            height: 100%;
+            background: #007bff;
+            width: 0%;
+            transition: width 0.3s;
+        }
+        .images-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .image-item {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+            text-align: center;
+        }
+        .image-item img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 5px;
+        }
+        .download-btn {
+            background: #28a745;
+            color: white;
+            padding: 5px 10px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            margin-top: 5px;
+            font-size: 12px;
+        }
+        .download-btn:hover {
+            background: #218838;
+        }
+        .status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🖼️ Extractor de Imágenes PDF - BUMPRDO</h1>
+        <p>Sube el archivo PDF de láminas para extraer las imágenes y mostrarlas en el carrusel.</p>
+        
+        <div class="upload-area" id="uploadArea">
+            <p>📁 Arrastra y suelta el archivo PDF aquí o haz clic para seleccionar</p>
+            <input type="file" id="pdfFile" accept=".pdf" style="display: none;">
+            <button class="btn" onclick="document.getElementById('pdfFile').click()">Seleccionar PDF</button>
+        </div>
+
+        <div id="progressContainer" style="display: none;">
+            <div class="progress">
+                <div class="progress-bar" id="progressBar"></div>
+            </div>
+            <p id="progressText">Procesando...</p>
+        </div>
+
+        <div id="status"></div>
+        
+        <div class="images-container" id="imagesContainer"></div>
+    </div>
+
+    <script>
+        // Configurar PDF.js
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        const uploadArea = document.getElementById('uploadArea');
+        const pdfFile = document.getElementById('pdfFile');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressBar = document.getElementById('progressBar');
+        const progressText = document.getElementById('progressText');
+        const status = document.getElementById('status');
+        const imagesContainer = document.getElementById('imagesContainer');
+
+        // Eventos de drag and drop
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0 && files[0].type === 'application/pdf') {
+                processPDF(files[0]);
+            }
+        });
+
+        pdfFile.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                processPDF(e.target.files[0]);
+            }
+        });
+
+        function showStatus(message, type = 'info') {
+            status.innerHTML = `<div class="status ${type}">${message}</div>`;
+        }
+
+        function updateProgress(percent, text) {
+            progressBar.style.width = percent + '%';
+            progressText.textContent = text;
+        }
+
+        async function processPDF(file) {
+            try {
+                showStatus('Iniciando extracción de imágenes...', 'info');
+                progressContainer.style.display = 'block';
+                imagesContainer.innerHTML = '';
+
+                const arrayBuffer = await file.arrayBuffer();
+                const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
+                
+                const totalPages = pdf.numPages;
+                const extractedImages = [];
+                
+                showStatus(`PDF cargado. Procesando ${totalPages} páginas...`, 'info');
+
+                for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+                    updateProgress((pageNum / totalPages) * 100, `Procesando página ${pageNum} de ${totalPages}`);
+                    
+                    const page = await pdf.getPage(pageNum);
+                    const viewport = page.getViewport({scale: 2.0}); // Escala 2x para mejor calidad
+                    
+                    // Crear canvas para renderizar la página
+                    const canvas = document.createElement('canvas');
+                    const context = canvas.getContext('2d');
+                    canvas.height = viewport.height;
+                    canvas.width = viewport.width;
+                    
+                    // Renderizar página
+                    await page.render({
+                        canvasContext: context,
+                        viewport: viewport
+                    }).promise;
+                    
+                    // Convertir canvas a imagen
+                    const imageData = canvas.toDataURL('image/png');
+                    extractedImages.push({
+                        data: imageData,
+                        page: pageNum,
+                        filename: `lamina_${pageNum}.png`
+                    });
+                }
+
+                updateProgress(100, 'Extracción completada');
+                showStatus(`✅ Se extrajeron ${extractedImages.length} imágenes del PDF`, 'success');
+                
+                // Mostrar imágenes extraídas
+                displayImages(extractedImages);
+                
+                // Generar código HTML para el carrusel
+                generateCarouselCode(extractedImages);
+                
+            } catch (error) {
+                console.error('Error al procesar PDF:', error);
+                showStatus(`❌ Error al procesar el PDF: ${error.message}`, 'error');
+            }
+        }
+
+        function displayImages(images) {
+            imagesContainer.innerHTML = '';
+            
+            images.forEach((image, index) => {
+                const imageItem = document.createElement('div');
+                imageItem.className = 'image-item';
+                
+                imageItem.innerHTML = `
+                    <img src="${image.data}" alt="Lámina ${image.page}">
+                    <p><strong>Lámina ${image.page}</strong></p>
+                    <button class="download-btn" onclick="downloadImage('${image.data}', '${image.filename}')">
+                        📥 Descargar
+                    </button>
+                `;
+                
+                imagesContainer.appendChild(imageItem);
+            });
+        }
+
+        function downloadImage(dataUrl, filename) {
+            const link = document.createElement('a');
+            link.href = dataUrl;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function generateCarouselCode(images) {
+            let carouselHTML = '';
+            
+            images.forEach((image, index) => {
+                carouselHTML += `
+        <div class="carousel-item">
+          <img src="laminas/${image.filename}" class="d-block w-100 oval-slide" alt="Lámina ${image.page}">
+        </div>`;
+            });
+
+            const fullCode = `<!-- Código HTML para agregar al carrusel -->
+${carouselHTML}`;
+
+            // Crear área para mostrar el código
+            const codeContainer = document.createElement('div');
+            codeContainer.style.marginTop = '20px';
+            codeContainer.style.padding = '15px';
+            codeContainer.style.background = '#f8f9fa';
+            codeContainer.style.border = '1px solid #dee2e6';
+            codeContainer.style.borderRadius = '5px';
+            codeContainer.innerHTML = `
+                <h4>📋 Código HTML para el carrusel:</h4>
+                <textarea style="width: 100%; height: 200px; font-family: monospace; font-size: 12px;" readonly>${fullCode}</textarea>
+                <p><strong>Instrucciones:</strong></p>
+                <ol>
+                    <li>Guarda las imágenes descargadas en la carpeta <code>laminas/</code> de tu proyecto</li>
+                    <li>Copia el código HTML de arriba</li>
+                    <li>Pega el código en el archivo <code>index.html</code> donde dice "Aquí se agregarán las imágenes de las láminas"</li>
+                </ol>
+            `;
+            
+            imagesContainer.appendChild(codeContainer);
+        }
+    </script>
+</body>
+</html> 
